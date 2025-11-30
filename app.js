@@ -1,8 +1,7 @@
 // =================== CLOUDPRNT CONFIG ===================
-// ⚠️ IMPORTANT:
-// 1) Replace CLOUDPRNT_ENDPOINT with your REAL Render URL (the one you put in the printer, + "/order")
-//    Example: "https://aldos-cloudprnt.onrender.com/cloudprnt/order"
-// 2) Replace PRINTER_DEVICE_ID with the Device ID shown in the printer CloudPRNT status page.
+// IMPORTANT:
+// 1) CLOUDPRNT_ENDPOINT must be your Render backend URL + "/submit"
+// 2) PRINTER_DEVICE_ID must match the Device ID shown in the printer CloudPRNT status.
 const CLOUDPRNT_ENDPOINT = "https://aldos-printcore-server-1.onrender.com/submit";
 const PRINTER_DEVICE_ID = "z2q6dwp2hagm";
 
@@ -899,7 +898,6 @@ function renderMenu() {
       });
 
     body.appendChild(frag);
-    wrap.appendChild(head);
     wrap.appendChild(body);
     menuEl.appendChild(wrap);
 
@@ -1801,3 +1799,280 @@ drinkAdd.addEventListener("click", () => {
   closeDrinkModal();
 });
 
+// ============== PAYMENT / ORDER TYPE ==============
+
+// payment method (cash/card + show card fields)
+payRadios.forEach(r => {
+  r.addEventListener("change", () => {
+    if (!r.checked) return;
+    state.payMethod = r.value;
+
+    if (cardBox) {
+      if (state.payMethod === "card") {
+        cardBox.classList.remove("hidden");
+      } else {
+        cardBox.classList.add("hidden");
+        if (cardName) cardName.value = "";
+        if (cardNumber) cardNumber.value = "";
+        if (cardExp) cardExp.value = "";
+        if (cardCvv) cardCvv.value = "";
+        if (cardZip) cardZip.value = "";
+      }
+    }
+  });
+});
+
+// order type (pickup/delivery + show delivery fields)
+orderTypeRadios.forEach(r => {
+  r.addEventListener("change", () => {
+    if (!r.checked) return;
+    state.orderType = r.value;
+
+    if (deliveryFields) {
+      if (state.orderType === "delivery") {
+        deliveryFields.classList.remove("hidden");
+      } else {
+        deliveryFields.classList.add("hidden");
+        if (delName) delName.value = "";
+        if (delPhone) delPhone.value = "";
+        if (delEmail) delEmail.value = "";
+        if (delAddress) delAddress.value = "";
+      }
+    }
+  });
+});
+
+// ============== CARD "SEND ORDER" BUTTON ==============
+if (cardSendBtn) {
+  cardSendBtn.addEventListener("click", () => {
+    if (state.payMethod !== "card") {
+      alert("Please select 'Card' as payment method first.");
+      return;
+    }
+
+    const name = cardName ? cardName.value.trim() : "";
+    const num = cardNumber ? cardNumber.value.trim() : "";
+    const exp = cardExp ? cardExp.value.trim() : "";
+    const cvv = cardCvv ? cardCvv.value.trim() : "";
+    const zip = cardZip ? cardZip.value.trim() : "";
+
+    if (!name || !num || !exp || !cvv) {
+      alert("Please fill in all required card fields (name, number, expiration, CVV).");
+      return;
+    }
+
+    const last4 = num.slice(-4);
+
+    alert(
+      `Card data captured:\n` +
+      `Name: ${name}\n` +
+      `Card: **** **** **** ${last4}\n` +
+      `Exp: ${exp}\n` +
+      `ZIP: ${zip || "-"}\n\n` +
+      `Now process this card on your terminal and confirm the order.`
+    );
+
+    if (checkoutBtn) {
+      checkoutBtn.click();
+    }
+  });
+}
+
+// ============== BUILD KITCHEN TICKET (TEXT) ==============
+function buildKitchenTicket() {
+  const lines = Object.values(state.cart)
+    .map(ci => {
+      const extraTxt = ci.extraPrice
+        ? ` (base ${money(ci.basePrice)} + extra ${money(ci.extraPrice)})`
+        : ` (base ${money(ci.basePrice)})`;
+      const noteTxt = ci.note ? ` | ${ci.note}` : "";
+      return `${ci.qty} x ${ci.name}${noteTxt}${extraTxt} — ${money(
+        ci.unitPrice * ci.qty
+      )}`;
+    })
+    .join("\n");
+
+  const payText =
+    state.payMethod === "cash"
+      ? "CASH"
+      : "CREDIT CARD";
+
+  const orderTypeText =
+    state.orderType === "delivery"
+      ? "DELIVERY (approx. 55 minutes)"
+      : "PICKUP (approx. 30 minutes)";
+
+  let deliveryInfo = "";
+  if (state.orderType === "delivery") {
+    deliveryInfo =
+      `\n\nDELIVERY DETAILS:\n` +
+      `Name: ${delName && delName.value ? delName.value : "-"}\n` +
+      `Phone: ${delPhone && delPhone.value ? delPhone.value : "-"}\n` +
+      `Email: ${delEmail && delEmail.value ? delEmail.value : "-"}\n` +
+      `Address: ${delAddress && delAddress.value ? delAddress.value : "-"}`;
+  }
+
+  const now = new Date();
+  const ts =
+    now.toLocaleDateString() + " " + now.toLocaleTimeString();
+
+  const txt =
+    `ALDO'S PIZZERIA\n` +
+    `2070 Street Rd, Bensalem, PA 19020\n` +
+    `------------------------------\n` +
+    `TIME: ${ts}\n` +
+    `ORDER TYPE: ${orderTypeText}\n` +
+    `PAYMENT: ${payText}\n` +
+    `------------------------------\n` +
+    `${lines}\n\n` +
+    `TOTAL: ${totalEl.textContent}` +
+    deliveryInfo +
+    `\n\nTHANK YOU!`;
+
+  return txt;
+}
+
+// ============== SEND TO CLOUDPRNT SERVER ==============
+async function sendToKitchen(ticketText) {
+  if (!ticketText || !CLOUDPRNT_ENDPOINT) {
+    console.error("Missing ticket text or CLOUDPRNT_ENDPOINT.");
+    return false;
+  }
+
+  try {
+    const res = await fetch(CLOUDPRNT_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticket: ticketText     // 👈 ESTE es el cambio importante
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error("CloudPRNT server returned an error:", errText || res.status);
+      alert("Error sending order to kitchen printer.");
+      return false;
+    }
+
+    console.log("✅ Ticket sent to CloudPRNT server.");
+    return true;
+  } catch (err) {
+    console.error("Error sending ticket to CloudPRNT:", err);
+    alert("Network error sending order to kitchen printer.");
+    return false;
+  }
+}
+
+// ============== PRINT BUTTON (BROWSER + CLOUDPRNT) ==============
+if (printBtn) {
+  printBtn.addEventListener("click", () => {
+    const ticket = buildKitchenTicket();
+
+    // Browser print window
+    const w = window.open("", "print");
+    w.document.write(
+      `<pre style="font:16px/1.45 monospace; white-space:pre-wrap;">${ticket}</pre>`
+    );
+    w.print();
+
+    // Also send to kitchen
+    sendToKitchen(ticket);
+  });
+}
+
+// ============== CHECKOUT BUTTON (SUMMARY + CLOUDPRNT) ==============
+if (checkoutBtn) {
+  checkoutBtn.addEventListener("click", async () => {
+    const payText =
+      state.payMethod === "cash"
+        ? "CASH"
+        : "CREDIT CARD (Visa / MasterCard / Discover / AmEx)";
+
+    const orderTypeText =
+      state.orderType === "delivery"
+        ? "DELIVERY (approx. 55 minutes)"
+        : "PICKUP (approx. 30 minutes)";
+
+    let msg =
+      `Total to pay: ${totalEl.textContent}\n` +
+      `Order type: ${orderTypeText}\n` +
+      `Payment method: ${payText}`;
+
+    if (state.orderType === "delivery") {
+      msg +=
+        `\n\nDelivery details:` +
+        `\nName: ${delName && delName.value ? delName.value : "-"}` +
+        `\nPhone: ${delPhone && delPhone.value ? delPhone.value : "-"}` +
+        `\nEmail: ${delEmail && delEmail.value ? delEmail.value : "-"}` +
+        `\nAddress: ${delAddress && delAddress.value ? delAddress.value : "-"}`;
+    }
+
+    if (state.payMethod === "card") {
+      msg +=
+        `\n\n➡ Please charge this amount on the CREDIT CARD terminal: ${totalEl.textContent}`;
+    } else {
+      msg += `\n\n➡ Customer will pay CASH at pickup / delivery.`;
+    }
+
+    alert(msg);
+
+    const ticket = buildKitchenTicket();
+    const ok = await sendToKitchen(ticket);
+
+    if (ok) {
+      // Clear cart only if the ticket was successfully sent
+      state.cart = {};
+      renderCart();
+    }
+  });
+}
+
+// ============== TOGGLE TOPPINGS (click again to undo) ==============
+document.addEventListener("click", e => {
+  const input = e.target;
+
+  if (
+    input &&
+    input.tagName === "INPUT" &&
+    input.type === "radio" &&
+    input.name &&
+    input.name.startsWith("top-")
+  ) {
+    if (input.dataset.wasChecked === "true") {
+      input.checked = false;
+      input.dataset.wasChecked = "false";
+      return;
+    }
+
+    const groupName = input.name;
+    document
+      .querySelectorAll(`input[name="${groupName}"]`)
+      .forEach(r => (r.dataset.wasChecked = "false"));
+
+    input.dataset.wasChecked = "true";
+  }
+});
+
+// ============== CART TOGGLE (MOBILE) ==============
+if (cartToggle && cart) {
+  cartToggle.addEventListener("click", () => {
+    cart.classList.toggle("open");
+  });
+}
+
+// ============== EMPTY CART BUTTON ==============
+if (emptyBtn) {
+  emptyBtn.addEventListener("click", () => {
+    state.cart = {};
+    renderCart();
+  });
+}
+
+// ============== INIT ==============
+renderCats();
+renderMenu();
+renderCart();
+if (cart) {
+  cart.classList.add("open");
+}
