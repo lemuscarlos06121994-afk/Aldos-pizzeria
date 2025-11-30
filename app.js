@@ -2,7 +2,7 @@
 // IMPORTANT:
 // 1) CLOUDPRNT_ENDPOINT must be your Render backend URL + "/submit"
 // 2) PRINTER_DEVICE_ID must match the Device ID shown in the printer CloudPRNT status.
-const CLOUDPRNT_ENDPOINT = "https://aldos-printcore-server-1.onrender.com/submit";
+const CLOUDPRNT_ENDPOINT =  "https://aldos-pzzeria-kiosco.onrender.com/submit";
 const PRINTER_DEVICE_ID = "z2q6dwp2hagm";
 
 // =================== MENU DATA ===================
